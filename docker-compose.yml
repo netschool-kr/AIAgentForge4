@@ -1,0 +1,11 @@
+services:
+  aiapp:
+    build: .
+    container_name: aiapp-instance
+    env_file:
+    - .env
+    ports:
+    - 3000:3000
+    - 8000:8000
+    command: reflex run --env prod --backend-host 0.0.0.0
+    restart: unless-stopped

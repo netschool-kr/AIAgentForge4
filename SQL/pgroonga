@@ -1,0 +1,10 @@
+-- 기존 GIN 인덱스 삭제
+DROP INDEX IF EXISTS document_sections_fts_idx;
+
+-- 기존 tsvector 컬럼 삭제
+ALTER TABLE document_sections DROP COLUMN IF EXISTS fts;
+
+-- content 컬럼에 PGroonga 인덱스 생성
+CREATE INDEX idx_document_sections_content_pgroonga
+ON document_sections
+USING pgroonga (content);

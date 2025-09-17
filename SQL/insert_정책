@@ -1,0 +1,17 @@
+-- collections 테이블에 대한 INSERT 정책
+CREATE POLICY "Users can create their own collections."
+ON collections FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = owner_id);
+
+-- documents 테이블에 대한 INSERT 정책
+CREATE POLICY "Users can create their own documents."
+ON documents FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = owner_id);
+
+-- document_sections 테이블에 대한 INSERT 정책
+CREATE POLICY "Users can create their own document sections."
+ON document_sections FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = owner_id);

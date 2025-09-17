@@ -1,0 +1,19 @@
+-- 게시판 생성을 처리하는 RPC(Remote Procedure Call) 함수
+-- 이 함수는 security_invoker 권한으로 실행되어, 함수를 호출한 사용자의 권한을 그대로 사용합니다.
+CREATE OR REPLACE FUNCTION public.create_new_board(
+    board_name text,
+    board_description text,
+    read_perm text,
+    write_perm text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY INVOKER -- !! 매우 중요: 호출자의 권한으로 함수를 실행합니다.
+AS $$
+BEGIN
+  -- RLS 정책은 이 INSERT 문이 실행될 때 자동으로 적용됩니다.
+  -- 함수를 호출한 사용자가 'admin'이 아니면, RLS 정책에 의해 이 INSERT는 실패하게 됩니다.
+  INSERT INTO public.boards (name, description, read_permission, write_permission)
+  VALUES (board_name, board_description, read_perm, write_perm);
+END;
+$$;

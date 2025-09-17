@@ -1,0 +1,20 @@
+-- DELETE 정책들
+CREATE POLICY "Users can delete their own collections."
+ON collections FOR DELETE TO authenticated USING (auth.uid() = owner_id);
+
+CREATE POLICY "Users can delete their own documents."
+ON documents FOR DELETE TO authenticated USING (auth.uid() = owner_id);
+
+CREATE POLICY "Users can delete their own document sections."
+ON document_sections FOR DELETE TO authenticated USING (auth.uid() = owner_id);
+
+-- UPDATE 정책들
+CREATE POLICY "Users can update their own collections."
+ON collections FOR UPDATE TO authenticated USING (auth.uid() = owner_id) WITH CHECK (auth.uid() = owner_id);
+
+CREATE POLICY "Users can update their own documents."
+ON documents FOR UPDATE TO authenticated USING (auth.uid() = owner_id) WITH CHECK (auth.uid() = owner_id);
+
+CREATE POLICY "Users can update their own document sections."
+ON document_sections FOR UPDATE TO authenticated USING (auth.uid() = owner_id) WITH CHECK (auth.uid() = owner_id);
+

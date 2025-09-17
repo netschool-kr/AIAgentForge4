@@ -1,0 +1,12 @@
+.git/
+.gitignore
+
+.venv/
+pycache/
+*.pyc
+
+.web/
+.states/
+node_modules/
+
+.env

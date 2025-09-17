@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION public.has_role(role_to_check TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY INVOKER
+AS $$  SELECT (auth.jwt() -> 'app_metadata' ->> 'role') = role_to_check;$$;

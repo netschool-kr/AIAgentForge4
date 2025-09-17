@@ -1,0 +1,49 @@
+DROP FUNCTION IF EXISTS hybrid_search_multilingual_test(text, vector, uuid, uuid, int, float);
+DROP FUNCTION IF EXISTS hybrid_search_multilingual_test(text, vector, uuid, uuid, int, int);
+
+-- 디버깅을 위해 LEFT JOIN을 사용하는 테스트 함수 생성
+CREATE OR REPLACE FUNCTION hybrid_search_multilingual_test(
+    query_text TEXT,
+    query_embedding VECTOR(1536),
+    p_owner_id UUID,
+    p_collection_id UUID,
+    match_count INT,
+    rrf_k INT = 60
+)
+RETURNS TABLE (
+    id UUID,
+    content TEXT,
+    rrf_score FLOAT
+)
+LANGUAGE sql
+AS $$
+WITH semantic_search AS (
+    SELECT ds.id, rank() OVER (ORDER BY ds.embedding <=> query_embedding) as rank
+    FROM document_sections ds
+    JOIN documents d ON ds.document_id = d.id
+    WHERE d.collection_id = p_collection_id AND ds.owner_id = p_owner_id
+    ORDER BY ds.embedding <=> query_embedding
+    LIMIT match_count
+),
+keyword_search AS (
+    SELECT ds.id, rank() OVER (ORDER BY pgroonga_score(ds.tableoid, ds.ctid) DESC) as rank
+    FROM document_sections ds
+    JOIN documents d ON ds.document_id = d.id
+    WHERE ds.content &@~ query_text AND d.collection_id = p_collection_id AND ds.owner_id = p_owner_id
+    ORDER BY pgroonga_score(ds.tableoid, ds.ctid) DESC
+    LIMIT match_count
+)
+SELECT
+    ds.id,
+    ds.content,
+    (
+        COALESCE(1.0 / (rrf_k + ss.rank), 0.0) +
+        COALESCE(1.0 / (rrf_k + ks.rank), 0.0)
+    ) AS rrf_score
+FROM semantic_search ss
+-- ❗ FULL OUTER JOIN을 LEFT JOIN으로 변경하여 테스트
+LEFT JOIN keyword_search ks ON ks.id = ss.id
+JOIN document_sections ds ON ds.id = COALESCE(ss.id, ks.id)
+ORDER BY rrf_score DESC
+LIMIT match_count;
+$$;

@@ -1,0 +1,66 @@
+-- ========= 1. comments 테이블 생성 =========
+-- 각 게시글에 대한 댓글을 저장하는 테이블
+CREATE TABLE public.comments (
+    id uuid NOT NULL DEFAULT gen_random_uuid(),
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    content text NOT NULL,
+    user_id uuid NOT NULL DEFAULT auth.uid(),
+    post_id uuid NOT NULL,
+    author_email text NULL,
+    CONSTRAINT comments_pkey PRIMARY KEY (id),
+    CONSTRAINT comments_post_id_fkey FOREIGN KEY (post_id) REFERENCES public.posts(id) ON DELETE CASCADE,
+    CONSTRAINT comments_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+-- 테이블 및 컬럼 주석
+COMMENT ON TABLE public.comments IS '게시글에 대한 댓글 정보를 저장하는 테이블';
+COMMENT ON COLUMN public.comments.content IS '댓글 내용';
+COMMENT ON COLUMN public.comments.user_id IS '작성자 ID (auth.users 테이블 참조)';
+COMMENT ON COLUMN public.comments.post_id IS '댓글이 달린 게시글 ID (posts 테이블 참조)';
+COMMENT ON COLUMN public.comments.author_email IS '작성자 이메일 (편의를 위해 저장)';
+
+-- 인덱스 추가 (성능 향상)
+CREATE INDEX comments_post_id_idx ON public.comments USING btree (post_id);
+CREATE INDEX comments_user_id_idx ON public.comments USING btree (user_id);
+
+
+-- ========= 2. RLS(Row Level Security) 활성화 =========
+ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
+
+
+-- ========= 3. comments 테이블에 대한 RLS 정책 설정 =========
+
+-- 정책 1: 게시글을 읽을 수 있는 사용자는 댓글도 읽을 수 있도록 허용
+CREATE POLICY "Allow users to read comments based on post permission"
+ON public.comments FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.posts p
+    JOIN public.boards b ON p.board_id = b.id
+    WHERE p.id = comments.post_id
+      AND (
+        b.read_permission = 'guest'
+        OR (b.read_permission = 'user' AND auth.role() = 'authenticated')
+        OR (b.read_permission = 'admin' AND public.get_user_role() = 'admin')
+      )
+  )
+);
+
+-- 정책 2: 로그인한 사용자는 댓글을 작성할 수 있도록 허용
+CREATE POLICY "Allow authenticated users to insert comments"
+ON public.comments FOR INSERT
+WITH CHECK (
+  auth.role() = 'authenticated'
+  AND comments.user_id = auth.uid() -- 작성자는 반드시 자신이어야 함
+);
+
+-- 정책 3: 댓글 작성자 본인만 수정을 허용
+CREATE POLICY "Allow owner to update their own comments"
+ON public.comments FOR UPDATE
+USING (user_id = auth.uid());
+
+-- 정책 4: 댓글 작성자 본인만 삭제를 허용
+CREATE POLICY "Allow owner to delete their own comments"
+ON public.comments FOR DELETE
+USING (user_id = auth.uid());

@@ -1,0 +1,9 @@
+-- documents 테이블 (collection_id 외래 키에 ON DELETE CASCADE 추가)
+CREATE TABLE documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    name TEXT NOT NULL,
+    owner_id UUID NOT NULL REFERENCES auth.users(id),
+    collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE
+    storage_path text NULL -- 실제 파일 경로를 저장할 열
+);

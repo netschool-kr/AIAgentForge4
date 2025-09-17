@@ -1,0 +1,65 @@
+-- ❗ [수정] 한/영 혼합 검색을 위해 query_text를 전처리하는 로직 추가
+CREATE OR REPLACE FUNCTION hybrid_search_multilingual(
+    query_text TEXT,
+    query_embedding VECTOR(1536),
+    p_owner_id UUID,
+    p_collection_id UUID,
+    match_count INT,
+    rrf_k INT = 60
+)
+RETURNS TABLE (
+    id UUID,
+    content TEXT,
+    document_id UUID,
+    collection_id UUID,
+    owner_id UUID,
+    rrf_score FLOAT
+)
+LANGUAGE sql
+SECURITY INVOKER
+AS $$
+WITH semantic_search AS (
+    -- 1. 의미 검색 (Vector Search) - 변경 없음
+    SELECT
+        ds.id,
+        rank() OVER (ORDER BY ds.embedding <=> query_embedding) as rank
+    FROM document_sections ds
+    JOIN documents d ON ds.document_id = d.id
+    WHERE d.collection_id = p_collection_id AND ds.owner_id = p_owner_id
+    ORDER BY ds.embedding <=> query_embedding
+    LIMIT match_count
+),
+keyword_search AS (
+    -- 2. 키워드 검색 (Full-Text Search)
+    SELECT
+        ds.id,
+        rank() OVER (ORDER BY pgroonga_score(ds.tableoid, ds.ctid) DESC) as rank
+    FROM document_sections ds
+    JOIN documents d ON ds.document_id = d.id
+    WHERE
+        -- ❗ [수정] query_text를 공백으로 분리하여 각 단어에 대한 OR 검색을 수행하도록 변경
+        -- 예: 'reflex state 설명해라' -> 'reflex OR state OR 설명해라' 와 유사하게 동작
+        ds.content &@~ array_to_string(regexp_split_to_array(trim(query_text), '\s+'), ' ') AND
+        d.collection_id = p_collection_id AND
+        ds.owner_id = p_owner_id
+    ORDER BY pgroonga_score(ds.tableoid, ds.ctid) DESC
+    LIMIT match_count
+)
+-- 3. 결과 통합 및 RRF 점수 계산 - 변경 없음
+SELECT
+    ds.id,
+    ds.content,
+    ds.document_id,
+    d.collection_id,
+    ds.owner_id,
+    (
+        COALESCE(1.0 / (rrf_k + ss.rank), 0.0) +
+        COALESCE(1.0 / (rrf_k + ks.rank), 0.0)
+    ) AS rrf_score
+FROM semantic_search ss
+FULL OUTER JOIN keyword_search ks ON ks.id = ss.id
+JOIN document_sections ds ON ds.id = COALESCE(ss.id, ks.id)
+JOIN documents d ON d.id = ds.document_id
+ORDER BY rrf_score DESC
+LIMIT match_count;
+$$;
