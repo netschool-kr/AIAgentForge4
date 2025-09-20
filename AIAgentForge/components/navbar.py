@@ -24,6 +24,7 @@ def _authed_link_items() -> list[tuple[str, str]]:
         (LanguageState.t["nav_youtube"], "/youtube"),
         (LanguageState.t["nav_blog"], "/blog"),
         (LanguageState.t["nav_research"], "/research"),
+         ("n8n", "/n8n2Langgraph"), 
     ]
 
 

@@ -29,7 +29,7 @@ from AIAgentForge.state.board_state import BoardState
 from fastapi import FastAPI
 from AIAgentForge.utils.v1_router import api_v1_router
 from uuid import uuid4
-
+from AIAgentForge.pages.n8n2langgraph import n8n_convert_page
 
 def setup_langchain_tracing():
     """LangSmith 추적을 위한 환경 변수를 설정합니다."""
@@ -93,6 +93,7 @@ app.add_page(blog_page, route="/blog")
 app.add_page(research_page, route="/research", title="AI Deep Research Agent")
 #app.add_page(lresearch_page, route="/lresearch", title="Local AI Deep Research Agent")
 app.add_page(email_page, route="/email", title="Send Email To Users")
+app.add_page(n8n_convert_page, route="/n8n2Langgraph")
 
 # --- [게시판 관련 페이지 라우팅 추가] ---
 app.add_page(boards_page, route="/boards", on_load=AuthState.check_auth)
