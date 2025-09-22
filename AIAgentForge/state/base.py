@@ -25,6 +25,7 @@ class BaseState(rx.State):
 
     SUPABASE_URL = os.getenv("SUPABASE_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
+    SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
     supabase_client: ClassVar[Client] = create_client(
         SUPABASE_URL,
@@ -62,3 +63,17 @@ class BaseState(rx.State):
         client: Client = create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
         client.auth.set_session(auth_state.access_token, '')
         return client
+    
+    #@classmethod
+    async def admin_client(slef) -> Client:
+        if not self.SUPABASE_URL or not self.SUPABASE_SERVICE_KEY:
+            raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY")
+        return create_client(self.SUPABASE_URL, self.SUPABASE_SERVICE_KEY)
+    
+    async def _get_service_client(self) -> Client:
+        key = os.getenv("SUPABASE_SERVICE_KEY")
+        if not key:
+            raise Exception("Missing SUPABASE_SERVICE_KEY")
+        client: Client = create_client(self.SUPABASE_URL, key)
+        return client
+    

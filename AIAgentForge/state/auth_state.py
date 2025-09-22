@@ -1,7 +1,7 @@
 # AIAgentForge/state/auth_state.py
 import reflex as rx
 from .base import BaseState
-from dotenv import load_dotenv
+import os
 import urllib
 
 class AuthState(BaseState):
@@ -10,7 +10,7 @@ class AuthState(BaseState):
     and checking the authentication status on page loads.
     """
 
-    SITE_URL = load_dotenv("SITE_URL")          # 배포 도메인
+    SITE_URL = os.getenv("SITE_URL")          # 배포 도메인
     REDIRECT_URI = f"{SITE_URL}/auth/callback"  # Supabase 대시보드와 동일해야 함
     # JWT tokens stored in browser cookies for session persistence.
     access_token: str = rx.Cookie("")
@@ -152,6 +152,12 @@ class AuthState(BaseState):
         self.error_message = ""
         yield
 
+        if form_data.get("password") != form_data.get("password_confirm"):
+            self.error_message = "비밀번호 확인이 일치하지 않습니다."; 
+            self.is_loading=False; 
+            yield; 
+            return
+
         try:
             response = self.supabase_client.auth.sign_up(
                 {"email": form_data["email"], "password": form_data["password"]}
@@ -169,35 +175,26 @@ class AuthState(BaseState):
             else:
                 self.error_message = "회원가입에 실패했습니다."
         except Exception as e:
-            self.error_message = f"오류 발생: {getattr(e, 'message', str(e))}"
+            code = getattr(e, "status", None) or getattr(e, "code", None)
+            self.error_message = f"회원가입 실패[{code}]: {str(e)}"
+            print(e)
         
         self.is_loading = False
         yield
 
-    async def oauth_start(self, provider_label: str):
-        SUPPORTED = {"google": "google", "kakao": "kakao"}  # 오타 방지 매핑
-        provider = SUPPORTED.get(provider_label.lower())
-        if not provider:
-            self.error_message = "지원하지 않는 소셜 로그인입니다."
-            return
-        qs = urllib.parse.urlencode({
-            "provider": provider,
-            "redirect_to": REDIRECT_URI,          # 예: https://<도메인>/auth/callback
-            "scopes": "openid profile email",
-        })
-        yield rx.redirect(f"{SUPABASE_URL}/auth/v1/authorize?{qs}")
-    
     async def oauth_start(self, provider: str):
-        # 권장: provider별 authorize URL로 리디렉트 (scopes에 openid 포함)
-        from urllib.parse import urlencode, quote
+        from urllib.parse import urlencode
+        if not self.SUPABASE_URL or not self.REDIRECT_URI:
+            self.error_message = "OAuth 설정 오류(SUPABASE_URL / SITE_URL)."
+            yield
+            return
         qs = urlencode({
             "provider": provider,
             "redirect_to": self.REDIRECT_URI,
             "scopes": "openid profile email",
         })
-        authorize_url = f"{self.SUPABASE_URL}/auth/v1/authorize?{qs}"
-        yield rx.redirect(authorize_url)
-
+        yield rx.redirect(f"{self.SUPABASE_URL}/auth/v1/authorize?{qs}")
+        
     async def oauth_callback(self, code: str):
         # PKCE 코드 -> 세션 교환
         resp = self.supabase_client.auth.exchange_code_for_session({"auth_code": code})
