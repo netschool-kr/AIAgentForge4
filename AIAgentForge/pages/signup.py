@@ -13,6 +13,30 @@ def _signup_form() -> rx.Component:
                 required=True,
                 width="100%",
             ),
+            # rx.input(
+            #     placeholder="표시 이름",
+            #     name="display_name",
+            #     required=True,
+            #     width="100%",
+            # ),
+            rx.input(
+                placeholder="사용자명(닉네임)",
+                name="username",
+                required=False,
+                width="100%",
+            ),
+            rx.input(
+                placeholder="전화번호",
+                name="phone",
+                type="tel",
+                required=False,
+                width="100%",
+            ),
+            rx.text_area(
+                placeholder="소개(선택)",
+                name="bio",
+                width="100%",
+            ),            
             rx.input(
                 placeholder=LanguageState.t["password_placeholder"],
                 name="password",
@@ -34,7 +58,7 @@ def _signup_form() -> rx.Component:
                 width="100%",
             ),
             rx.button("Google로 계속", on_click=lambda: AuthState.oauth_start("google")),
-            rx.button("Kakao로 계속", on_click=lambda: AuthState.oauth_start("kakao"), width="100%"),
+            #rx.button("Kakao로 계속", on_click=lambda: AuthState.oauth_start("kakao"), width="100%"),
             spacing="4",
             width="100%",
         ),
@@ -43,7 +67,17 @@ def _signup_form() -> rx.Component:
 
 def _auth_footer() -> rx.Component:
     return rx.vstack(
-        rx.cond(
+        rx.cond(  # ✅ 성공 메시지 표시
+            AuthState.success_message != "",
+            rx.callout(
+                AuthState.success_message,
+                icon="check",
+                color_scheme="green",
+                width="100%",
+                margin_top="1em",
+            ),
+        ),
+        rx.cond(  # 기존 오류 표시 유지
             AuthState.error_message != "",
             rx.callout(
                 AuthState.error_message,
@@ -69,6 +103,7 @@ def _auth_footer() -> rx.Component:
         spacing="4",
         align="center",
     )
+
 
 def _mobile_signup() -> rx.Component:
     return rx.flex(

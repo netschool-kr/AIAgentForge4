@@ -3,6 +3,7 @@ import reflex as rx
 from .base import BaseState
 import os
 import urllib
+import re
 
 class AuthState(BaseState):
     """
@@ -10,16 +11,94 @@ class AuthState(BaseState):
     and checking the authentication status on page loads.
     """
 
+    # IMPORTANT: Ensure these environment variables are set in your .env file.
+    # .env 파일에 아래 환경 변수들을 반드시 설정해야 합니다.
+    # SUPABASE_URL="https://your-project-ref.supabase.co"
+    # SUPABASE_KEY="your-anon-public-key"
+    # SITE_URL="http://localhost:3000" (or your production domain)
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
     SITE_URL = os.getenv("SITE_URL")          # 배포 도메인
     REDIRECT_URI = f"{SITE_URL}/auth/callback"  # Supabase 대시보드와 동일해야 함
+
     # JWT tokens stored in browser cookies for session persistence.
     access_token: str = rx.Cookie("")
     refresh_token: str = rx.Cookie("")
     
     # State for UI feedback during auth operations.
     error_message: str = ""
+    success_message: str = ""
     is_loading: bool = False
 
+    username_input: str = ""
+    username_checking: bool = False
+    username_available: bool | None = None
+    username_message: str = ""
+
+    @rx.event
+    def oauth_start(self, provider: str):
+        """Supabase OAuth 시작: Google 등."""
+        if not self.SUPABASE_URL or not self.SITE_URL:
+            self.error_message = "환경변수 누락: SUPABASE_URL, SITE_URL"
+            yield
+            return
+        redirect_to = f"{self.SITE_URL}/auth/callback"
+        qs = {
+            "provider": provider,
+            "redirect_to": redirect_to,
+            # 필요 시 scope, prompt 등 추가 가능
+            # "scopes": "email profile",
+            # "prompt": "consent",
+        }
+        url = (
+            f"{self.SUPABASE_URL}/auth/v1/authorize?"
+            + urllib.parse.urlencode(qs, safe="/:")
+        )
+        # 외부 URL 이동
+        yield rx.redirect(url, external=True)
+            
+    def set_username_input(self, v: str):
+        v = (v or "").strip().lower()
+        self.username_input = v
+        self.username_available = None
+        self.username_message = ""
+
+    async def check_username_unique(self, v: str | None = None):
+        uname = (v or self.username_input or "").strip().lower()
+        if not uname:
+            self.username_message = "사용자명을 입력하세요."
+            self.username_available = None
+            yield
+            return
+        # 패턴 검사(서버측과 동일)
+        import re
+        if not re.fullmatch(r"[a-z0-9_]{3,20}", uname):
+            self.username_message = "3~20자 영문소문자/숫자/_ 만 허용."
+            self.username_available = None
+            yield
+            return
+
+        self.username_checking = True
+        self.username_message = ""
+        self.username_available = None
+        yield
+        try:
+            # 대소문자 무시 비교를 위해 서버는 소문자 인덱스로 보장. 여기선 eq로 충분.
+            resp = self.supabase_client.table("profiles") \
+                .select("id") \
+                .eq("username", uname) \
+                .limit(1) \
+                .execute()
+            taken = bool(resp.data)
+            self.username_available = not taken
+            self.username_message = "사용 가능" if not taken else "이미 사용 중"
+        except Exception as e:
+            self.username_available = None
+            self.username_message = f"확인 실패: {e}"
+        finally:
+            self.username_checking = False
+            yield
+            
     @rx.var
     def user_email(self) -> str:
         """Returns the user's email if they are logged in, otherwise an empty string."""
@@ -109,33 +188,32 @@ class AuthState(BaseState):
         self.user = None
         
     async def handle_login(self, form_data: dict):
-        """Handles the login form submission."""
         self.is_loading = True
         self.error_message = ""
         yield
-
         try:
             response = self.supabase_client.auth.sign_in_with_password(
                 {"email": form_data["email"], "password": form_data["password"]}
             )
             if response.session:
-                # Success! Set cookies and server state.
                 self.access_token = response.session.access_token
                 self.refresh_token = response.session.refresh_token
                 self.is_authenticated = True
                 self.user = response.user
                 self.is_loading = False
-                # Yield the redirect event instead of returning it.
                 yield rx.redirect("/")
-                # Use a bare return to exit the generator.
                 return
-        except Exception:
-            self.error_message = "이메일 또는 비밀번호가 잘못되었습니다."
-        
-        # This part only runs if login fails.
+        except Exception as e:
+            msg = getattr(e, "message", None) or str(e)
+            if "Email not confirmed" in msg or "email not confirmed" in msg:
+                self.error_message = "이메일 인증 후 로그인하세요."
+            elif "Invalid login credentials" in msg or "invalid login credentials" in msg:
+                self.error_message = "이메일 또는 비밀번호가 잘못되었습니다."
+            else:
+                self.error_message = f"로그인 실패: {msg}"
         self.is_loading = False
         yield
-
+        
     async def handle_logout(self):
         """Logs the user out, clears all state, and redirects."""
         self.access_token = ""
@@ -146,44 +224,133 @@ class AuthState(BaseState):
         self.supabase_client.auth.sign_out()
         yield rx.redirect("/login")
 
+
+
+
     async def handle_signup(self, form_data: dict):
-        """Handles the signup form submission."""
+        """회원가입 처리.
+        - 비번 확인
+        - username 정규식 검사(옵션)
+        - supabase.auth.sign_up
+        - 세션 있으면 JWT로 profiles upsert (RLS 통과)
+        - 세션 없으면 이메일 인증 안내 (profiles는 DB 트리거가 생성)
+        """
+        # UI 상태 초기화
         self.is_loading = True
         self.error_message = ""
+        self.success_message = ""
+        USERNAME_RE = re.compile(r"^[a-z0-9_]{3,20}$")
+        
         yield
 
-        if form_data.get("password") != form_data.get("password_confirm"):
-            self.error_message = "비밀번호 확인이 일치하지 않습니다."; 
-            self.is_loading=False; 
-            yield; 
+        try:
+            email = (form_data.get("email") or "").strip()
+            password = form_data.get("password") or ""
+            password_confirm = form_data.get("password_confirm") or ""
+            raw_username = (form_data.get("username") or "").strip()
+            username = raw_username.lower() if raw_username else None
+
+            # 기본 유효성
+            if not email or not password:
+                self.error_message = "이메일과 비밀번호를 입력하세요."
+                self.is_loading = False
+                yield
+                return
+            if password != password_confirm:
+                self.error_message = "비밀번호 확인이 일치하지 않습니다."
+                self.is_loading = False
+                yield
+                return
+            if username and not USERNAME_RE.fullmatch(username):
+                self.error_message = "사용자명 형식 오류: 3~20자 영문소문자/숫자/_"
+                self.is_loading = False
+                yield
+                return
+
+            # 회원가입
+            resp = self.supabase_client.auth.sign_up({"email": email, "password": password})
+
+            # supabase-py v2/구버전 호환 처리
+            user = getattr(resp, "user", None) or (resp.get("user") if isinstance(resp, dict) else None)
+            session = getattr(resp, "session", None) or (resp.get("session") if isinstance(resp, dict) else None)
+
+            if not user:
+                self.error_message = "회원가입에 실패했습니다."
+                self.is_loading = False
+                yield
+                return
+
+            # 세션이 있으면 JWT로 RLS 통과 후 profiles upsert
+            if session and getattr(session, "access_token", None) or (isinstance(session, dict) and session.get("access_token")):
+                access_token = getattr(session, "access_token", None) or session["access_token"]
+                refresh_token = getattr(session, "refresh_token", None) or session.get("refresh_token")
+
+                # PostgREST에 JWT 주입
+                try:
+                    # supabase-py v2
+                    if hasattr(self.supabase_client, "postgrest"):
+                        self.supabase_client.postgrest.auth(access_token)
+                    # 일부 구버전 호환
+                    if hasattr(self.supabase_client, "auth") and hasattr(self.supabase_client.auth, "set_session") and refresh_token:
+                        self.supabase_client.auth.set_session({
+                            "access_token": access_token,
+                            "refresh_token": refresh_token,
+                        })
+                except Exception:
+                    # 주입 실패해도 아래 upsert가 실패하면 예외로 처리
+                    pass
+
+                # profiles upsert (username 유니크는 DB 인덱스가 보장)
+                row = {"id": getattr(user, "id", None) or user.get("id")}
+                if username:
+                    row["username"] = username
+
+                try:
+                    self.supabase_client.table("profiles").upsert(row).execute()
+                except Exception as e:
+                    # 유니크 위반 등 처리
+                    msg = str(e).lower()
+                    if "unique" in msg or "duplicate" in msg or "23505" in msg:
+                        self.error_message = "이미 사용 중인 사용자명입니다."
+                    else:
+                        self.error_message = f"프로필 저장 실패: {str(e)}"
+                    self.is_loading = False
+                    yield
+                    return
+
+                # 바로 로그인 흐름 유지
+                # (이미 세션이 있더라도 기존 로직을 재사용하려면 호출)
+                try:
+                    async for _ in self.handle_login({"email": email, "password": password}):
+                        yield _
+                    return
+                except Exception:
+                    # 로그인 재호출 실패 시에도 가입은 완료
+                    self.success_message = "회원가입 완료. 대시보드로 이동을 시도했으나 세션 동기화가 필요합니다."
+                    print("회원가입 완료. 대시보드로 이동을 시도했으나 세션 동기화가 필요합니다.")
+                    self.is_loading = False
+                    yield
+                    return
+
+            # 세션이 없는 경우: 이메일 인증 후 첫 로그인 때 사용
+            self.success_message = "회원가입 성공. 이메일 인증을 완료하세요."
+            print("회원가입 성공. 이메일 인증을 완료하세요.")
+            self.is_loading = False
+            yield rx.redirect("/login?verify=email")
             return
 
-        try:
-            response = self.supabase_client.auth.sign_up(
-                {"email": form_data["email"], "password": form_data["password"]}
-            )
-            if response.user:
-                # Depending on your Supabase settings, a session might be returned directly.
-                if response.session:
-                    # Delegate event handling to handle_login.
-                    # We must iterate over the async generator and yield its events.
-                    async for event in self.handle_login(form_data):
-                        yield event
-                    return
-                else:
-                    self.error_message = "회원가입 성공! 확인 이메일을 확인해주세요."
-            else:
-                self.error_message = "회원가입에 실패했습니다."
         except Exception as e:
             code = getattr(e, "status", None) or getattr(e, "code", None)
             self.error_message = f"회원가입 실패[{code}]: {str(e)}"
-            print(e)
-        
-        self.is_loading = False
-        yield
+            self.is_loading = False
+            yield
+            return
 
     async def oauth_start(self, provider: str):
         from urllib.parse import urlencode
+        # Supabase 대시보드에서 Google OAuth를 활성화하고,
+        # 클라이언트 ID와 시크릿을 추가해야 합니다.
+        # 또한, `REDIRECT_URI`를 `your-project-ref.supabase.co/auth/v1/callback`에 추가해야 합니다.
         if not self.SUPABASE_URL or not self.REDIRECT_URI:
             self.error_message = "OAuth 설정 오류(SUPABASE_URL / SITE_URL)."
             yield
