@@ -20,6 +20,7 @@ def _login_form() -> rx.Component:
                 required=True,
                 width="100%",
             ),
+            rx.button("Google로 계속", on_click=lambda: AuthState.oauth_start("google")),
             rx.button(
                 LanguageState.t["login_button"],
                 type="submit",

@@ -54,36 +54,50 @@ class AuthState(BaseState):
         yield
 
         # URL 파라미터에서 access_token, refresh_token을 추출
-        parsed_url = urllib.parse.urlparse(self.router.as_page_name)
+        # parsed_url = urllib.parse.urlparse(self.router.as_page_name)
+        # page = getattr(self.router, "page", None)
+        # raw = ""
+        # if page:
+        #     raw = getattr(page, "full_raw_path", None) or getattr(page, "url", None) or getattr(page, "raw_path", "") or ""
+        # parsed_url = urllib.parse.urlparse(raw)
+        parsed_url = self.router.url
+
+        params = {}
         if parsed_url.fragment:
-            fragment_params = urllib.parse.parse_qs(parsed_url.fragment)
-            access_token = fragment_params.get("access_token", [None])[0]
-            refresh_token = fragment_params.get("refresh_token", [None])[0]
-        else:
-            access_token = None
-            refresh_token = None
+            params.update(urllib.parse.parse_qs(parsed_url.fragment))
+        if parsed_url.query:
+            params.update(urllib.parse.parse_qs(parsed_url.query))
+
+        access_token  = (params.get("access_token")  or [None])[0]
+        refresh_token = (params.get("refresh_token") or [None])[0]
+        # PKCE 코드가 쿼리로 온 경우를 커버
+        code = (params.get("code") or [None])[0] or code        
+        
+        # if parsed_url.fragment:
+        #     fragment_params = urllib.parse.parse_qs(parsed_url.fragment)
+        #     access_token = fragment_params.get("access_token", [None])[0]
+        #     refresh_token = fragment_params.get("refresh_token", [None])[0]
+        # else:
+        #     access_token = None
+        #     refresh_token = None
             
         # URL 파라미터에서 토큰을 직접 받는 경우 (implicit flow)
         if access_token and refresh_token:
-            try:
-                # 받은 토큰으로 세션 정보 설정
-                session_data = {
-                    "access_token": access_token,
-                    "refresh_token": refresh_token,
-                }
-                
-                # 받은 세션으로 사용자 정보 설정
-                self.supabase_client.auth.set_session(session_data)
-                self.user = self.supabase_client.auth.get_user().user
-                self.is_authenticated = True
-                self.is_loading = False
-                yield rx.redirect("/")
-                return
-            except Exception as e:
-                self.error_message = f"세션 처리 실패: {e}"
-                self.is_loading = False
-                yield rx.redirect("/login")
-                return
+            # 세션 설정: 위치 인자 2개만
+            self.supabase_client.auth.set_session(access_token, refresh_token)
+
+            # 로컬 상태 동기화
+            self.access_token = access_token
+            self.refresh_token = refresh_token
+            self.is_authenticated = True
+
+            # 사용자 동기화
+            resp = self.supabase_client.auth.get_user(access_token)
+            self.user = resp.user if resp else None
+
+            self.is_loading = False
+            yield rx.redirect("/")
+            return
 
         # URL 파라미터에서 code를 받아 세션을 교환하는 경우 (PKCE flow)
         if code:

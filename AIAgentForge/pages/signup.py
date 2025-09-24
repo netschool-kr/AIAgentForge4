@@ -57,7 +57,7 @@ def _signup_form() -> rx.Component:
                 is_loading=AuthState.is_loading,
                 width="100%",
             ),
-            rx.button("Google로 계속", on_click=lambda: AuthState.oauth_start("google")),
+            rx.button("Google로 계속", on_click=lambda: AuthState.oauth_start("google", "signup")),
             #rx.button("Kakao로 계속", on_click=lambda: AuthState.oauth_start("kakao"), width="100%"),
             spacing="4",
             width="100%",
