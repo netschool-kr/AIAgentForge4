@@ -30,6 +30,7 @@ from fastapi import FastAPI
 from AIAgentForge.utils.v1_router import api_v1_router
 from uuid import uuid4
 from AIAgentForge.pages.n8n2langgraph import n8n_convert_page
+from AIAgentForge.pages.auth_callback import auth_callback_page
 
 def setup_langchain_tracing():
     """LangSmith 추적을 위한 환경 변수를 설정합니다."""
@@ -87,6 +88,11 @@ app.add_page(
 app.add_page(login_page, route="/login")
 app.add_page(signup_page, route="/signup")
 app.add_page(search_page, route="/search")
+app.add_page(
+    auth_callback_page, 
+    route="/auth/callback",
+    on_load=AuthState.oauth_callback
+)
 app.add_page(collections_page, route="/collections")
 app.add_page(youtube_page, route="/youtube")
 app.add_page(blog_page, route="/blog")
