@@ -1,0 +1,23 @@
+# Dockerfile.ncloud
+FROM python:3.11 AS base
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /app
+
+# 빌드에 필요한 툴 (Reflex 프런트 빌드에 node 필요)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs npm git build-essential libffi-dev libssl-dev curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# 파이썬 의존성
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 앱 소스
+COPY . .
+
+# 배포 실행
+ENV REFLEX_ENV=prod
+EXPOSE 8000
+CMD ["reflex","run","--env","prod","--backend-host","0.0.0.0"]

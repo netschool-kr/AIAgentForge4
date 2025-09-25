@@ -1,0 +1,9 @@
+# docker-compose.ncloud.yml
+services:
+  aiapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.ncloud
+    image: ${REGISTRY}/${IMAGE}:${TAG:-latest}
+    platform: ${PLATFORM:-linux/amd64}   # VM 아키에 맞게 변경 가능
+    # 빌드/푸시 전용. 실행 옵션은 run 파일에서 관리.

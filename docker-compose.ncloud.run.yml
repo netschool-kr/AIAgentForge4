@@ -1,0 +1,10 @@
+# docker-compose.ncloud.run.yml
+services:
+  aiapp:
+    image: ${REGISTRY}/${IMAGE}:${TAG:-latest}
+    platform: ${PLATFORM:-linux/amd64}
+    restart: unless-stopped
+    env_file:
+      - .env                # 앱 런타임 환경(Reflex, Supabase 등)
+    ports:
+      - "80:8000"           # Nginx 앞단이면 생략하거나 8000만 노출

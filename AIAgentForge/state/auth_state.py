@@ -3,6 +3,7 @@ import reflex as rx
 from .base import BaseState
 import os
 from urllib.parse import urlencode
+from urllib.parse import urlencode, parse_qs
 import re
 import urllib.parse
 
@@ -28,9 +29,17 @@ class AuthState(BaseState):
     username_checking: bool = False
     username_available: bool | None = None
     username_message: str = ""
-
+    oauth_user_info: dict[str, str] = {}
+ 
+    call_from: str=""
+    signup_email: str = ""
+    signup_display_name: str = ""
+    signup_username: str = ""
+    signup_phone: str = ""
+    signup_bio: str = ""
+   
     @rx.event
-    async def oauth_start(self, provider: str):
+    async def oauth_start(self, provider: str, call_from:str):
         """Supabase OAuth 시작: Google 등."""
         if not self.SUPABASE_URL or not self.REDIRECT_URI:
             self.error_message = "OAuth 설정 오류(SUPABASE_URL / SITE_URL)."
@@ -39,8 +48,10 @@ class AuthState(BaseState):
         qs = urlencode({
             "provider": provider,
             "redirect_to": self.REDIRECT_URI,
-            "scopes": "openid profile email",
+            "scopes": "openid profile email"           
         })
+        self.call_from = call_from
+        
         # external=True 인자를 제거합니다.
         yield rx.redirect(f"{self.SUPABASE_URL}/auth/v1/authorize?{qs}")
         
@@ -53,39 +64,26 @@ class AuthState(BaseState):
         self.is_loading = True
         yield
 
-        # URL 파라미터에서 access_token, refresh_token을 추출
-        # parsed_url = urllib.parse.urlparse(self.router.as_page_name)
-        # page = getattr(self.router, "page", None)
-        # raw = ""
-        # if page:
-        #     raw = getattr(page, "full_raw_path", None) or getattr(page, "url", None) or getattr(page, "raw_path", "") or ""
-        # parsed_url = urllib.parse.urlparse(raw)
         parsed_url = self.router.url
 
         params = {}
         if parsed_url.fragment:
-            params.update(urllib.parse.parse_qs(parsed_url.fragment))
+            params.update(parse_qs(parsed_url.fragment))
         if parsed_url.query:
-            params.update(urllib.parse.parse_qs(parsed_url.query))
-
+            params.update(parse_qs(parsed_url.query))
+            
         access_token  = (params.get("access_token")  or [None])[0]
         refresh_token = (params.get("refresh_token") or [None])[0]
-        # PKCE 코드가 쿼리로 온 경우를 커버
-        code = (params.get("code") or [None])[0] or code        
+        code = (params.get("code") or [None])[0] or code
         
-        # if parsed_url.fragment:
-        #     fragment_params = urllib.parse.parse_qs(parsed_url.fragment)
-        #     access_token = fragment_params.get("access_token", [None])[0]
-        #     refresh_token = fragment_params.get("refresh_token", [None])[0]
-        # else:
-        #     access_token = None
-        #     refresh_token = None
-            
+        # 'state' 파라미터에서 소스 정보(login/signup) 추출
+        source = (params.get("state") or [None])[0] or "login"
+        
         # URL 파라미터에서 토큰을 직접 받는 경우 (implicit flow)
         if access_token and refresh_token:
-            # 세션 설정: 위치 인자 2개만
-            self.supabase_client.auth.set_session(access_token, refresh_token)
-
+            # 세션 설정
+            self.supabase_client.auth.set_session(access_token,refresh_token)
+ 
             # 로컬 상태 동기화
             self.access_token = access_token
             self.refresh_token = refresh_token
@@ -94,6 +92,25 @@ class AuthState(BaseState):
             # 사용자 동기화
             resp = self.supabase_client.auth.get_user(access_token)
             self.user = resp.user if resp else None
+            
+            # 소셜 계정 정보(이메일, 표시 이름 등)를 저장
+            if self.user:
+                meta = getattr(self.user, "user_metadata", {}) or {}
+                self.oauth_user_info = {
+                    "email": getattr(self.user, "email", "") or "",
+                    "display_name": meta.get("full_name") or meta.get("name") or meta.get("preferred_username") or ""
+                }
+            
+            # 회원가입 경로인 경우, 회원가입 페이지로 리디렉션
+            if self.call_from == "signup":
+                # 회원가입 폼을 미리 채우거나 추가 정보 입력 유도
+                self.is_loading = False
+                self.signup_email = self.oauth_user_info["email"]
+                self.signup_display_name = self.oauth_user_info["display_name"]
+                self.signup_username = (self.signup_display_name or self.signup_email.split("@")[0] or "").lower()
+                
+                yield rx.redirect("/signup")
+                return
 
             self.is_loading = False
             yield rx.redirect("/")
@@ -108,6 +125,25 @@ class AuthState(BaseState):
                     self.refresh_token = resp.session.refresh_token
                     self.user = resp.user
                     self.is_authenticated = True
+
+                    # 소셜 계정 정보(이메일, 표시 이름 등)를 저장
+                    if self.user:
+                        meta = getattr(self.user, "user_metadata", {}) or {}
+                        self.oauth_user_info = {
+                            "email": getattr(self.user, "email", "") or "",
+                            "display_name": meta.get("full_name") or meta.get("name") or meta.get("preferred_username") or ""
+                        }
+
+                        if self.call_from == "signup":
+                            # 회원가입 폼을 미리 채우거나 추가 정보 입력 유도
+                            self.is_loading = False
+                            self.signup_email = self.oauth_user_info["email"]
+                            self.signup_display_name = self.oauth_user_info["display_name"]
+                            self.signup_username = (self.signup_display_name or self.signup_email.split("@")[0] or "").lower()
+                            
+                            yield rx.redirect("/signup")
+                            return
+
                     self.is_loading = False
                     yield rx.redirect("/")
                     return
@@ -222,6 +258,7 @@ class AuthState(BaseState):
         self.refresh_token = ""
         self.is_authenticated = False
         self.user = None
+        self.oauth_user_info = {}
         
     async def handle_login(self, form_data: dict):
         self.is_loading = True
@@ -308,10 +345,7 @@ class AuthState(BaseState):
                     if hasattr(self.supabase_client, "postgrest"):
                         self.supabase_client.postgrest.auth(access_token)
                     if hasattr(self.supabase_client, "auth") and hasattr(self.supabase_client.auth, "set_session") and refresh_token:
-                        self.supabase_client.auth.set_session({
-                            "access_token": access_token,
-                            "refresh_token": refresh_token,
-                        })
+                        self.supabase_client.auth.set_session(access_token,refresh_token)
                 except Exception:
                     pass
 

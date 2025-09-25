@@ -12,6 +12,7 @@ def _signup_form() -> rx.Component:
                 type="email",
                 required=True,
                 width="100%",
+                default_value=AuthState.signup_email,
             ),
             # rx.input(
             #     placeholder="표시 이름",
@@ -24,6 +25,7 @@ def _signup_form() -> rx.Component:
                 name="username",
                 required=False,
                 width="100%",
+                default_value=AuthState.signup_username,
             ),
             rx.input(
                 placeholder="전화번호",
